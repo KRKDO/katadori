@@ -1,0 +1,23 @@
+// UI-independent checks for the guided interaction state and event handlers.
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+const elements=new Map();
+const pixels=new Uint8ClampedArray(120*100*4).fill(255);
+for(let y=20;y<70;y++)for(let x=10;x<90;x++)pixels.fill(30,(y*120+x)*4,(y*120+x)*4+3);
+const context=new Proxy({getImageData:()=>({width:120,height:100,data:pixels})},{get:(o,k)=>o[k]||(()=>{})});
+const el=id=>{if(!elements.has(id))elements.set(id,{value:id==='threshold'?'160':id==='smooth'?'2':id==='polarity'?'auto':'',style:{},classList:{toggle(){}},getContext:()=>context,getBoundingClientRect:()=>({left:0,top:0}),clientWidth:122,clientHeight:102,setPointerCapture(){},click(){this.onclick?.()}});return elements.get(id)};
+let queued;const sandbox={document:{getElementById:el,createElement:()=>({getContext:()=>context})},Geometry:require('./geometry.js'),structuredClone,setTimeout:fn=>{queued=fn;return 1},clearTimeout:()=>{queued=null},console};
+vm.createContext(sandbox);vm.runInContext(fs.readFileSync('app.js','utf8'),sandbox);
+const run=s=>vm.runInContext(s,sandbox);
+run("load({width:120,height:100},'test.png')");
+assert.equal(run('mode'),'auto');assert.match(el('guideTitle').textContent,/内側/);
+el('canvas').onpointerdown({clientX:40,clientY:40});
+assert.equal(run('closed'),true);assert.equal(run('validTrace'),true);assert.equal(el('next').hidden,false);assert.equal(el('export').disabled,true);
+el('threshold').onpointerdown();el('threshold').value='1';el('threshold').oninput();queued();
+assert.equal(run('validTrace'),false);assert.equal(el('export').disabled,true);
+el('undo').onclick();assert.equal(run('validTrace'),true);assert.notEqual(el('threshold').value,'1');
+el('next').onclick();assert.equal(run('mode'),'calibrate');assert.match(el('guideTitle').textContent,/①/);
+el('canvas').onpointerdown({clientX:95,clientY:80});assert.match(el('guideTitle').textContent,/②/);
+el('canvas').onpointerdown({clientX:115,clientY:80});assert.match(el('guideTitle').textContent,/③/);assert.equal(el('export').disabled,true);el('canvas').onpointerdown({clientX:105,clientY:80});assert.equal(run('coin.length'),2);el('canvas').onpointerdown({clientX:105,clientY:70});assert.equal(el('width').textContent,'80.00 mm');assert.equal(el('height').textContent,'50.00 mm');assert.equal(el('export').disabled,false);
+el('manual').onclick();assert.equal(run('points.length'),0);assert.equal(el('close').hidden,false);
+el('undo').onclick();assert.equal(run('closed'),true);
+console.log('PASS: guided auto selection, live retry/failure, undo, three-point calibration, export gating, manual restart');
